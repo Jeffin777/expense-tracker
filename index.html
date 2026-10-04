@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description"
+    content="Personal Expense Tracker web application for tracking income, expenses, balance, and visual summary analytics.">
+  <title>Expense Tracker</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+
+<body>
+  <div class="app-container">
+    <!-- Header Section -->
+    <header class="app-header">
+      <h1>Expense Tracker</h1>
+      <p class="subtitle">Manage your personal finances efficiently</p>
+    </header>
+
+    <main class="app-main">
+      <!-- Financial Summary Cards -->
+      <section class="summary-section" aria-label="Financial Summary">
+        <div class="summary-card income-card">
+          <h2>Total Income</h2>
+          <p id="total-income" class="summary-amount">₹0.00</p>
+        </div>
+        <div class="summary-card expense-card">
+          <h2>Total Expense</h2>
+          <p id="total-expense" class="summary-amount">₹0.00</p>
+        </div>
+        <div class="summary-card balance-card">
+          <h2>Net Balance</h2>
+          <p id="balance" class="summary-amount">₹0.00</p>
+        </div>
+      </section>
+
+      <!-- Transaction Form Section -->
+      <section class="form-section" aria-label="Transaction Entry Form">
+        <h2>Add Transaction</h2>
+        <form id="transaction-form" novalidate>
+          <!-- Type Field -->
+          <div class="form-group">
+            <label for="type">Transaction Type</label>
+            <select id="type" name="type" required aria-describedby="type-error">
+              <option value="" disabled selected>Select Type</option>
+              <option value="income">Income</option>
+              <option value="expense">Expense</option>
+            </select>
+            <span id="type-error" class="error-message" aria-live="polite"></span>
+          </div>
+
+          <!-- Amount Field -->
+          <div class="form-group">
+            <label for="amount">Amount (₹)</label>
+            <input type="number" id="amount" name="amount" min="0.01" step="0.01" placeholder="0.00" required
+              aria-describedby="amount-error">
+            <span id="amount-error" class="error-message" aria-live="polite"></span>
+          </div>
+
+          <!-- Category Field -->
+          <div class="form-group">
+            <label for="category">Category</label>
+            <select id="category" name="category" required aria-describedby="category-error">
+              <option value="" disabled selected>Select Category</option>
+            </select>
+            <span id="category-error" class="error-message" aria-live="polite"></span>
+          </div>
+
+          <!-- Date Field -->
+          <div class="form-group">
+            <label for="date">Date</label>
+            <input type="date" id="date" name="date" required aria-describedby="date-error">
+            <span id="date-error" class="error-message" aria-live="polite"></span>
+          </div>
+
+          <!-- Description Field -->
+          <div class="form-group">
+            <label for="description">Description</label>
+            <input type="text" id="description" name="description" maxlength="100" placeholder="Brief description"
+              required aria-describedby="description-error">
+            <span id="description-error" class="error-message" aria-live="polite"></span>
+          </div>
+
+          <!-- Actions -->
+          <div class="form-actions">
+            <button type="submit" id="submit-btn" class="btn btn-primary">Add Transaction</button>
+            <button type="button" id="cancel-btn" class="btn btn-secondary" hidden>Cancel</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Filter Controls Section -->
+      <section class="filter-section" aria-label="Filter Transactions">
+        <div class="filter-header">
+          <h2>Transactions History</h2>
+          <button type="button" id="clear-filters-btn" class="btn btn-secondary btn-sm">Clear Filters</button>
+        </div>
+        <div class="filter-bar">
+          <div class="filter-group">
+            <label for="filter-type">Filter by Type</label>
+            <select id="filter-type">
+              <option value="all">All Types</option>
+              <option value="income">Income Only</option>
+              <option value="expense">Expense Only</option>
+            </select>
+          </div>
+
+          <div class="filter-group">
+            <label for="filter-category">Filter by Category</label>
+            <select id="filter-category">
+              <option value="all">All Categories</option>
+            </select>
+          </div>
+
+          <div class="filter-group">
+            <label for="filter-month">Filter by Month</label>
+            <select id="filter-month">
+              <option value="all">All Months</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Transaction List Section -->
+      <section class="list-section" aria-label="Transaction List">
+        <div class="list-meta">
+          <p id="filter-count" class="filter-count">Showing 0 of 0 transactions</p>
+        </div>
+        <div id="empty-state" class="empty-state">
+          <p id="empty-state-text">No transactions found. Add a transaction above to get started!</p>
+        </div>
+        <ul id="transaction-list" class="transaction-list"></ul>
+      </section>
+
+      <!-- Analytics & Summary Section -->
+      <section class="analytics-section" aria-label="Financial Analytics">
+        <h2>Analytics & Reports</h2>
+        <div class="analytics-grid">
+          <div id="monthly-summary" class="analytics-card">
+            <h3>Monthly Breakdown</h3>
+            <div class="monthly-summary-content"></div>
+          </div>
+          <div id="category-chart" class="analytics-card">
+            <h3>Category Breakdown</h3>
+            <div class="category-chart-content"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+
+</html>
