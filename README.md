@@ -58,7 +58,7 @@ No build tools, package managers, or third-party libraries are required.
 ### Option 1: Open Direct in Browser
 1. Clone the repository:
    ```bash
-   git clone https://github.com/Jeffin777/expense-tracker
+   git clone https://github.com/Jeffin777/expense-tracker-jeffinjose.git
    ```
 2. Navigate to the project folder:
    ```bash
