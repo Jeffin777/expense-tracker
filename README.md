@@ -6,27 +6,6 @@ Tech Stack: HTML5 | CSS3 | JavaScript (ES6+) | Local Storage
 
 ---
 
-## Live Demo
-
-[ADD LIVE LINK]
-
----
-
-## Screenshots
-
-![Desktop Dashboard](screenshots/desktop-dashboard.png)
-*Desktop Dashboard View (1280px)*
-
-![Mobile Layout](screenshots/mobile-view.png)
-*Mobile Responsive Layout (360px)*
-
-![Dark Theme](screenshots/dark-theme.png)
-*Dark Mode Interface*
-
-> **Note**: Create a `screenshots/` directory in the repository root containing `desktop-dashboard.png`, `mobile-view.png`, and `dark-theme.png`.
-
----
-
 ## Features
 
 ### Core
@@ -79,7 +58,7 @@ No build tools, package managers, or third-party libraries are required.
 ### Option 1: Open Direct in Browser
 1. Clone the repository:
    ```bash
-   git clone [REPO URL]
+   git clone https://github.com/Jeffin777/expense-tracker
    ```
 2. Navigate to the project folder:
    ```bash
@@ -194,5 +173,5 @@ The application has been verified using the following manual test checklist:
 
 ## Author
 
-**[YOUR NAME]**
-- GitHub: [GITHUB PROFILE LINK]
+**[Jeffin Jose]**
+- GitHub: https://github.com/Jeffin777/
