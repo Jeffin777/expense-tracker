@@ -62,7 +62,7 @@ No build tools, package managers, or third-party libraries are required.
    ```
 2. Navigate to the project folder:
    ```bash
-   cd expense-tracker
+   cd expense-tracker-jeffinjose
    ```
 3. Open `index.html` in any web browser (double-click `index.html` or open via file menu).
 
