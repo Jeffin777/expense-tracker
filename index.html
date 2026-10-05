@@ -4,10 +4,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f8fafc" id="theme-color-meta">
   <meta name="description"
-    content="Personal Expense Tracker web application for tracking income, expenses, balance, and visual summary analytics.">
+    content="Personal Expense Tracker web application for tracking income, expenses, balance, monthly budgets, and visual summary analytics.">
   <title>Expense Tracker</title>
   <link rel="stylesheet" href="style.css">
+  <script>
+    (function () {
+      const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    })();
+  </script>
   <script src="app.js" defer></script>
 </head>
 
@@ -15,24 +22,131 @@
   <div class="app-container">
     <!-- Header Section -->
     <header class="app-header">
-      <h1>Expense Tracker</h1>
-      <p class="subtitle">Manage your personal finances efficiently</p>
+      <div class="header-brand">
+        <div class="logo-mark" aria-hidden="true">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="32" height="32" rx="10" fill="url(#logo-grad)" />
+            <path d="M9 19.5L14 14.5L18 17.5L23 11.5" stroke="white" stroke-width="2.5" stroke-linecap="round"
+              stroke-linejoin="round" />
+            <path d="M18.5 11.5H23V16" stroke="white" stroke-width="2.5" stroke-linecap="round"
+              stroke-linejoin="round" />
+            <defs>
+              <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#6366F1" />
+                <stop offset="1" stop-color="#4F46E5" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="title-group">
+          <h1>Expense Tracker</h1>
+          <p class="subtitle">Manage your personal finances efficiently</p>
+        </div>
+      </div>
+      <button type="button" id="theme-toggle" class="theme-toggle-btn" aria-label="Toggle dark mode"
+        title="Toggle dark theme">
+        <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+        <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+      </button>
     </header>
 
     <main class="app-main">
       <!-- Financial Summary Cards -->
       <section class="summary-section" aria-label="Financial Summary">
         <div class="summary-card income-card">
-          <h2>Total Income</h2>
+          <div class="summary-card-header">
+            <h2>Total Income</h2>
+            <div class="summary-icon-badge income-badge" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="19" x2="12" y2="5"></line>
+                <polyline points="5 12 12 5 19 12"></polyline>
+              </svg>
+            </div>
+          </div>
           <p id="total-income" class="summary-amount">₹0.00</p>
         </div>
         <div class="summary-card expense-card">
-          <h2>Total Expense</h2>
+          <div class="summary-card-header">
+            <h2>Total Expense</h2>
+            <div class="summary-icon-badge expense-badge" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <polyline points="19 12 12 19 5 12"></polyline>
+              </svg>
+            </div>
+          </div>
           <p id="total-expense" class="summary-amount">₹0.00</p>
         </div>
         <div class="summary-card balance-card">
-          <h2>Net Balance</h2>
+          <div class="summary-card-header">
+            <h2>Net Balance</h2>
+            <div class="summary-icon-badge balance-badge" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="5" width="20" height="14" rx="3"></rect>
+                <line x1="2" y1="10" x2="22" y2="10"></line>
+              </svg>
+            </div>
+          </div>
           <p id="balance" class="summary-amount">₹0.00</p>
+        </div>
+      </section>
+
+      <!-- Smart Insights Strip -->
+      <section class="insights-section analytics-card" id="insights-section" aria-label="Smart Financial Insights">
+        <h2>Smart Insights</h2>
+        <ul id="insights-list" class="insights-list" aria-live="polite"></ul>
+      </section>
+
+      <!-- Monthly Budget Section -->
+      <section class="budget-section analytics-card" id="monthly-budget" aria-label="Monthly Budget Tracking">
+        <h2 id="budget-heading">Monthly Budget</h2>
+
+        <!-- Budget Form -->
+        <form id="budget-form" novalidate>
+          <div class="form-group">
+            <label for="budget-input">Monthly budget limit (Rs.)</label>
+            <div class="budget-input-group">
+              <input type="number" id="budget-input" name="budget-input" min="1" step="0.01"
+                placeholder="Enter budget limit" required>
+              <button type="submit" id="budget-save-btn" class="btn btn-primary btn-sm">Save Budget</button>
+              <button type="button" id="budget-clear-btn" class="btn btn-secondary btn-sm" hidden>Remove</button>
+            </div>
+            <span id="budget-error" class="error-message" aria-live="polite"></span>
+          </div>
+        </form>
+
+        <!-- Empty State -->
+        <div id="budget-empty-state" class="budget-empty-state">
+          <p>Set a monthly budget to track your spending.</p>
+        </div>
+
+        <!-- Budget Progress Container -->
+        <div id="budget-progress-container" class="budget-progress-container" hidden>
+          <div id="budget-bar" class="budget-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+            aria-valuenow="0" aria-label="Budget used">
+            <div id="budget-bar-fill" class="budget-bar-fill"></div>
+          </div>
+          <div class="budget-meta">
+            <p id="budget-text" class="budget-text"></p>
+            <p id="budget-status" class="budget-status"></p>
+          </div>
         </div>
       </section>
 
@@ -43,7 +157,7 @@
           <!-- Type Field -->
           <div class="form-group">
             <label for="type">Transaction Type</label>
-            <select id="type" name="type" required aria-describedby="type-error">
+            <select id="type" name="type" required>
               <option value="" disabled selected>Select Type</option>
               <option value="income">Income</option>
               <option value="expense">Expense</option>
@@ -54,15 +168,14 @@
           <!-- Amount Field -->
           <div class="form-group">
             <label for="amount">Amount (₹)</label>
-            <input type="number" id="amount" name="amount" min="0.01" step="0.01" placeholder="0.00" required
-              aria-describedby="amount-error">
+            <input type="number" id="amount" name="amount" min="0.01" step="0.01" placeholder="0.00" required>
             <span id="amount-error" class="error-message" aria-live="polite"></span>
           </div>
 
           <!-- Category Field -->
           <div class="form-group">
             <label for="category">Category</label>
-            <select id="category" name="category" required aria-describedby="category-error">
+            <select id="category" name="category" required>
               <option value="" disabled selected>Select Category</option>
             </select>
             <span id="category-error" class="error-message" aria-live="polite"></span>
@@ -71,7 +184,7 @@
           <!-- Date Field -->
           <div class="form-group">
             <label for="date">Date</label>
-            <input type="date" id="date" name="date" required aria-describedby="date-error">
+            <input type="date" id="date" name="date" required>
             <span id="date-error" class="error-message" aria-live="polite"></span>
           </div>
 
@@ -79,9 +192,12 @@
           <div class="form-group">
             <label for="description">Description</label>
             <input type="text" id="description" name="description" maxlength="100" placeholder="Brief description"
-              required aria-describedby="description-error">
+              required>
             <span id="description-error" class="error-message" aria-live="polite"></span>
           </div>
+
+          <!-- General Form Error Message -->
+          <div id="form-error" class="form-error-general" aria-live="polite" role="alert" hidden></div>
 
           <!-- Actions -->
           <div class="form-actions">
@@ -134,7 +250,7 @@
         <ul id="transaction-list" class="transaction-list"></ul>
       </section>
 
-      <!-- Analytics & Summary Section -->
+      <!-- Analytics & Summary Placeholders -->
       <section class="analytics-section" aria-label="Financial Analytics">
         <h2>Analytics & Reports</h2>
         <div class="analytics-grid">
@@ -150,6 +266,23 @@
       </section>
     </main>
   </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const themeBtn = document.getElementById('theme-toggle');
+      if (themeBtn) {
+        themeBtn.addEventListener('click', () => {
+          const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+          document.documentElement.setAttribute('data-theme', current);
+          localStorage.setItem('theme', current);
+          const metaTheme = document.getElementById('theme-color-meta');
+          if (metaTheme) {
+            metaTheme.setAttribute('content', current === 'dark' ? '#0b0f17' : '#f8fafc');
+          }
+        });
+      }
+    });
+  </script>
 </body>
 
 </html>

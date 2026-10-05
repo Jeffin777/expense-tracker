@@ -7,6 +7,7 @@
 // Constants & Application State
 // ==========================================================================
 const STORAGE_KEY = "expenseTracker.transactions";
+const STORAGE_BUDGET_KEY = "expenseTracker.budget";
 
 const CATEGORIES = {
   income: ["Salary", "Freelance", "Investments", "Other Income"],
@@ -41,7 +42,8 @@ const state = {
     category: "all",
     month: "all"
   },
-  editingId: null
+  editingId: null,
+  budget: null
 };
 
 // ==========================================================================
@@ -61,35 +63,362 @@ function generateId() {
 
 /**
  * Calculate totals (income, expense, net balance) for a given list of transactions
- * Uses cent-integer arithmetic to prevent floating-point precision errors (e.g. 0.1 + 0.2)
+ * Computes in integer paise to avoid floating point issues
  * @param {Array} list - Array of transaction objects
  * @returns {Object} { income, expense, balance }
  */
 function calcTotals(list) {
   if (!Array.isArray(list)) return { income: 0, expense: 0, balance: 0 };
   
-  let incomeCents = 0;
-  let expenseCents = 0;
+  let incomePaise = 0;
+  let expensePaise = 0;
 
   list.forEach((item) => {
-    const amtCents = Math.round((Number(item.amount) || 0) * 100);
+    const amt = Number(item.amount) || 0;
+    const paise = Math.round(amt * 100);
     if (item.type === "income") {
-      incomeCents += amtCents;
+      incomePaise += paise;
     } else if (item.type === "expense") {
-      expenseCents += amtCents;
+      expensePaise += paise;
     }
   });
 
-  const income = incomeCents / 100;
-  const expense = expenseCents / 100;
-  const balance = (incomeCents - expenseCents) / 100;
+  const income = incomePaise / 100;
+  const expense = expensePaise / 100;
+  const balance = (incomePaise - expensePaise) / 100;
 
   return { income, expense, balance };
 }
 
 /**
+ * Pure function: Get all expense transactions for a specific month (YYYY-MM)
+ * @param {Array} transactions 
+ * @param {string} monthKey 
+ * @returns {Array} List of expense transaction objects
+ */
+function getMonthExpenses(transactions, monthKey) {
+  if (!Array.isArray(transactions) || !monthKey) return [];
+  return transactions.filter(
+    (t) => t.type === "expense" && t.date && t.date.startsWith(monthKey)
+  );
+}
+
+/**
+ * Pure function: Get total income and expense for a month in rupees (computed in integer paise)
+ * @param {Array} transactions 
+ * @param {string} monthKey 
+ * @returns {Object} { income, expense }
+ */
+function getMonthIncomeAndExpense(transactions, monthKey) {
+  if (!Array.isArray(transactions) || !monthKey) return { income: 0, expense: 0 };
+
+  let incomePaise = 0;
+  let expensePaise = 0;
+
+  transactions.forEach((t) => {
+    if (t.date && t.date.startsWith(monthKey)) {
+      const paise = Math.round((Number(t.amount) || 0) * 100);
+      if (t.type === "income") {
+        incomePaise += paise;
+      } else if (t.type === "expense") {
+        expensePaise += paise;
+      }
+    }
+  });
+
+  return { income: incomePaise / 100, expense: expensePaise / 100 };
+}
+
+/**
+ * Pure function: Get top category by expense amount
+ * Computes in integer paise
+ * @param {Array} expenses 
+ * @returns {Object|null} { category, amount, percent }
+ */
+function getTopCategory(expenses) {
+  if (!Array.isArray(expenses) || expenses.length === 0) return null;
+
+  const map = new Map();
+  let totalPaise = 0;
+
+  expenses.forEach((t) => {
+    const paise = Math.round((Number(t.amount) || 0) * 100);
+    totalPaise += paise;
+    map.set(t.category, (map.get(t.category) || 0) + paise);
+  });
+
+  if (totalPaise === 0) return null;
+
+  // Sort by amount descending; on tie, sort alphabetically for stability
+  const sorted = Array.from(map.entries()).sort((a, b) => {
+    if (b[1] !== a[1]) return b[1] - a[1];
+    return a[0].localeCompare(b[0]);
+  });
+
+  const [topCategory, topAmountPaise] = sorted[0];
+  const percent = (topAmountPaise / totalPaise) * 100;
+
+  return {
+    category: topCategory,
+    amount: topAmountPaise / 100,
+    percent
+  };
+}
+
+/**
+ * Pure function: Calculate Month-Over-Month percentage change
+ * @param {number} currentTotal 
+ * @param {number} previousTotal 
+ * @returns {number|null} Percent change or null if previousTotal is 0
+ */
+function getMonthOverMonthChange(currentTotal, previousTotal) {
+  const c = Number(currentTotal) || 0;
+  const p = Number(previousTotal) || 0;
+  if (p === 0) return null;
+  return ((c - p) / p) * 100;
+}
+
+/**
+ * Pure function: Calculate average daily spend
+ * Divides by days elapsed so far if current local month, else total days in month
+ * @param {number} total 
+ * @param {string} monthKey 
+ * @returns {number} Average daily spend
+ */
+function getAverageDailySpend(total, monthKey) {
+  const safeTotal = Number(total) || 0;
+  if (!monthKey || monthKey.length < 7) return safeTotal;
+
+  const now = new Date();
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  const [yearStr, monthStr] = monthKey.split("-");
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+
+  let days = 1;
+  if (monthKey === currentMonthKey) {
+    days = Math.max(1, now.getDate());
+  } else {
+    days = new Date(year, month, 0).getDate();
+  }
+
+  if (days <= 0) days = 1;
+  return safeTotal / days;
+}
+
+/**
+ * Pure function: Find highest single expense transaction
+ * @param {Array} expenses 
+ * @returns {Object|null} Highest expense object
+ */
+function getHighestExpense(expenses) {
+  if (!Array.isArray(expenses) || expenses.length === 0) return null;
+
+  return expenses.reduce((max, t) => {
+    const amt = Number(t.amount) || 0;
+    const maxAmt = max ? Number(max.amount) || 0 : -1;
+    return amt > maxAmt ? t : max;
+  }, null);
+}
+
+/**
+ * Pure function: Calculate savings rate percentage
+ * @param {number} income 
+ * @param {number} expense 
+ * @returns {number|null} Savings rate percentage or null if income is 0
+ */
+function getSavingsRate(income, expense) {
+  const inc = Number(income) || 0;
+  const exp = Number(expense) || 0;
+  if (inc === 0) return null;
+  return ((inc - exp) / inc) * 100;
+}
+
+/**
+ * Pure function: Get previous month key (YYYY-MM)
+ * @param {string} monthKey 
+ * @returns {string} Previous YYYY-MM
+ */
+function getPreviousMonthKey(monthKey) {
+  if (!monthKey || monthKey.length < 7) return "";
+  const [yearStr, monthStr] = monthKey.split("-");
+  let year = parseInt(yearStr, 10);
+  let month = parseInt(monthStr, 10) - 1;
+  if (month < 1) {
+    month = 12;
+    year -= 1;
+  }
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+/**
+ * Pure function: Build list of smart insight objects
+ * @param {Array} transactions 
+ * @param {string} monthKey 
+ * @returns {Array} List of insight objects: { text, icon, type }
+ */
+function buildInsights(transactions, monthKey) {
+  if (!Array.isArray(transactions) || transactions.length === 0) {
+    return [
+      {
+        text: "Add a few transactions to see insights.",
+        icon: "💡",
+        type: "normal"
+      }
+    ];
+  }
+
+  const monthExpenses = getMonthExpenses(transactions, monthKey);
+  const { income: monthIncome, expense: monthExpense } = getMonthIncomeAndExpense(transactions, monthKey);
+  const monthLabel = getTrackedMonthLabel(monthKey);
+
+  if (monthExpenses.length === 0) {
+    return [
+      {
+        text: `No expenses recorded for ${monthLabel}.`,
+        icon: "ℹ️",
+        type: "normal"
+      }
+    ];
+  }
+
+  const insights = [];
+
+  // 1. Top Category
+  const topCat = getTopCategory(monthExpenses);
+  if (topCat) {
+    insights.push({
+      text: `You spent most on ${topCat.category} (${Math.round(topCat.percent)}%)`,
+      icon: "📊",
+      type: "normal"
+    });
+  }
+
+  // 2. Month-over-Month Spending Change
+  const prevMonthKey = getPreviousMonthKey(monthKey);
+  const prevExpenses = getMonthExpenses(transactions, prevMonthKey);
+  const prevExpenseTotal = prevExpenses.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+  
+  if (prevExpenseTotal > 0) {
+    const momChange = getMonthOverMonthChange(monthExpense, prevExpenseTotal);
+    if (momChange !== null) {
+      if (momChange >= -1 && momChange <= 1) {
+        insights.push({
+          text: "Spending is about the same as last month",
+          icon: "➡️",
+          type: "normal"
+        });
+      } else if (momChange > 1) {
+        insights.push({
+          text: `Spending is up ${Math.round(momChange)}% vs last month`,
+          icon: "📈",
+          type: "expense-up"
+        });
+      } else if (momChange < -1) {
+        insights.push({
+          text: `Spending is down ${Math.round(Math.abs(momChange))}% vs last month`,
+          icon: "📉",
+          type: "expense-down"
+        });
+      }
+    }
+  }
+
+  // 3. Average Daily Spend
+  const dailyAvg = getAverageDailySpend(monthExpense, monthKey);
+  insights.push({
+    text: `Average daily spend: ${formatCurrency(dailyAvg)}`,
+    icon: "📅",
+    type: "normal"
+  });
+
+  // 4. Highest Expense
+  const highest = getHighestExpense(monthExpenses);
+  if (highest) {
+    const dateFormatted = formatDateShort(highest.date);
+    insights.push({
+      text: `Highest expense: ${formatCurrency(highest.amount)} on ${dateFormatted} (${highest.description})`,
+      icon: "💸",
+      type: "normal"
+    });
+  }
+
+  // 5. Savings Rate
+  const savingsRate = getSavingsRate(monthIncome, monthExpense);
+  if (savingsRate !== null) {
+    if (savingsRate >= 0) {
+      insights.push({
+        text: `You saved ${Math.round(savingsRate)}% of your income this month`,
+        icon: "💰",
+        type: "income-good"
+      });
+    } else {
+      insights.push({
+        text: "You spent more than you earned this month",
+        icon: "⚠️",
+        type: "expense-up"
+      });
+    }
+  }
+
+  return insights.slice(0, 5);
+}
+
+/**
+ * Pure function: Calculate total expense for a specific month (YYYY-MM) in integer paise
+ * @param {Array} transactions 
+ * @param {string} monthKey 
+ * @returns {number} Total expense in rupees
+ */
+function getMonthExpenseTotal(transactions, monthKey) {
+  if (!Array.isArray(transactions) || !monthKey) return 0;
+
+  const totalPaise = transactions.reduce((acc, t) => {
+    if (t.type === "expense" && t.date && t.date.startsWith(monthKey)) {
+      const paise = Math.round((Number(t.amount) || 0) * 100);
+      return acc + paise;
+    }
+    return acc;
+  }, 0);
+
+  return totalPaise / 100;
+}
+
+/**
+ * Pure function: Calculate budget status metrics
+ * @param {number} spent - Total amount spent
+ * @param {number} budget - Monthly budget limit
+ * @returns {Object} { percent, level, remaining }
+ */
+function getBudgetStatus(spent, budget) {
+  const safeSpent = Number(spent) || 0;
+  const safeBudget = Number(budget) || 0;
+
+  if (safeBudget <= 0) {
+    return { percent: 0, level: "safe", remaining: 0 };
+  }
+
+  const percent = (safeSpent / safeBudget) * 100;
+
+  let level = "safe";
+  if (percent >= 100) {
+    level = "danger";
+  } else if (percent >= 80) {
+    level = "warning";
+  }
+
+  // Calculate remaining with paise precision
+  const spentPaise = Math.round(safeSpent * 100);
+  const budgetPaise = Math.round(safeBudget * 100);
+  const remainingPaise = budgetPaise - spentPaise;
+  const remaining = remainingPaise / 100;
+
+  return { percent, level, remaining };
+}
+
+/**
  * Group transactions by YYYY-MM and return income, expense, and balance per month sorted newest first
- * Uses integer math for precision safety
  * @param {Array} list - Array of transactions
  * @returns {Array} List of monthly summary objects
  */
@@ -114,25 +443,25 @@ function monthlySummary(list) {
       map.set(monthKey, {
         monthKey,
         monthLabel,
-        incomeCents: 0,
-        expenseCents: 0
+        incomePaise: 0,
+        expensePaise: 0
       });
     }
 
     const record = map.get(monthKey);
-    const amtCents = Math.round((Number(item.amount) || 0) * 100);
+    const paise = Math.round((Number(item.amount) || 0) * 100);
     if (item.type === "income") {
-      record.incomeCents += amtCents;
+      record.incomePaise += paise;
     } else if (item.type === "expense") {
-      record.expenseCents += amtCents;
+      record.expensePaise += paise;
     }
   });
 
   return Array.from(map.values())
     .map((rec) => {
-      const income = rec.incomeCents / 100;
-      const expense = rec.expenseCents / 100;
-      const balance = (rec.incomeCents - rec.expenseCents) / 100;
+      const income = rec.incomePaise / 100;
+      const expense = rec.expensePaise / 100;
+      const balance = (rec.incomePaise - rec.expensePaise) / 100;
       return {
         monthKey: rec.monthKey,
         monthLabel: rec.monthLabel,
@@ -146,7 +475,6 @@ function monthlySummary(list) {
 
 /**
  * Pure function to sum expenses per category and calculate percentages
- * Uses cent-integer math for rounding accuracy
  * @param {Array} list - Array of transactions
  * @returns {Object} { items: Array, totalExpense: number }
  */
@@ -161,20 +489,20 @@ function groupByCategory(list) {
   }
 
   const map = new Map();
-  let totalExpenseCents = 0;
+  let totalExpensePaise = 0;
 
   expenseItems.forEach((t) => {
-    const amtCents = Math.round((Number(t.amount) || 0) * 100);
-    totalExpenseCents += amtCents;
-    map.set(t.category, (map.get(t.category) || 0) + amtCents);
+    const paise = Math.round((Number(t.amount) || 0) * 100);
+    totalExpensePaise += paise;
+    map.set(t.category, (map.get(t.category) || 0) + paise);
   });
 
-  const totalExpense = totalExpenseCents / 100;
+  const totalExpense = totalExpensePaise / 100;
   const sortedCategories = Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
 
-  const items = sortedCategories.map(([category, amtCents], index) => {
-    const amount = amtCents / 100;
-    const percentage = totalExpenseCents > 0 ? (amtCents / totalExpenseCents) * 100 : 0;
+  const items = sortedCategories.map(([category, amountPaise], index) => {
+    const amount = amountPaise / 100;
+    const percentage = totalExpense > 0 ? (amount / totalExpense) * 100 : 0;
     const color = CATEGORY_COLORS[index % CATEGORY_COLORS.length];
     return {
       category,
@@ -197,12 +525,15 @@ function getFiltered(appState) {
   if (!Array.isArray(transactions)) return [];
 
   return transactions.filter((item) => {
+    // Type Filter
     if (filters.type !== "all" && item.type !== filters.type) {
       return false;
     }
+    // Category Filter
     if (filters.category !== "all" && item.category !== filters.category) {
       return false;
     }
+    // Month Filter (YYYY-MM)
     if (filters.month !== "all") {
       if (!item.date || !item.date.startsWith(filters.month)) {
         return false;
@@ -226,19 +557,6 @@ function sortNewestFirst(list) {
 // ==========================================================================
 
 /**
- * Get current local date string formatted as YYYY-MM-DD
- * Prevents UTC timezone shifting bugs
- * @returns {string} Local YYYY-MM-DD date
- */
-function getTodayString() {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-/**
  * Format a number as INR currency string
  * @param {number} amount
  * @returns {string} Formatted currency string
@@ -252,8 +570,7 @@ function formatCurrency(amount) {
 }
 
 /**
- * Format date string (YYYY-MM-DD) to local readable date
- * Avoids timezone shift when constructing Date object
+ * Format date string (YYYY-MM-DD) to readable format
  * @param {string} dateString 
  * @returns {string} Formatted date string
  */
@@ -261,10 +578,8 @@ function formatDate(dateString) {
   if (!dateString) return "";
   const parts = dateString.split("-");
   if (parts.length !== 3) return dateString;
-  const year = parseInt(parts[0], 10);
-  const monthIndex = parseInt(parts[1], 10) - 1;
-  const day = parseInt(parts[2], 10);
-  const dateObj = new Date(year, monthIndex, day);
+  const [year, month, day] = parts;
+  const dateObj = new Date(year, month - 1, day);
   return dateObj.toLocaleDateString("en-IN", {
     day: "numeric",
     month: "short",
@@ -273,9 +588,26 @@ function formatDate(dateString) {
 }
 
 /**
- * Load and validate transactions safely from localStorage
- * Filters out corrupted objects or malformed data structures
- * @returns {Array} Sanitized transactions array
+ * Format date string to short format (e.g. "12 Oct")
+ * @param {string} dateString 
+ * @returns {string} Short formatted date
+ */
+function formatDateShort(dateString) {
+  if (!dateString) return "";
+  const parts = dateString.split("-");
+  if (parts.length !== 3) return dateString;
+  const [year, month, day] = parts;
+  const dateObj = new Date(year, month - 1, day);
+  return dateObj.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short"
+  });
+}
+
+/**
+ * Load transactions safely from localStorage
+ * Filters out corrupt or invalid schemas
+ * @returns {Array} List of stored transactions or empty array fallback
  */
 function loadTransactions() {
   try {
@@ -283,24 +615,21 @@ function loadTransactions() {
     if (!rawData) return [];
     const parsed = JSON.parse(rawData);
     if (!Array.isArray(parsed)) return [];
-
-    return parsed.filter((item) => {
-      return (
-        item &&
-        typeof item === "object" &&
-        typeof item.id === "string" &&
-        (item.type === "income" || item.type === "expense") &&
-        typeof item.amount === "number" &&
-        !isNaN(item.amount) &&
-        item.amount > 0 &&
-        typeof item.category === "string" &&
-        typeof item.date === "string" &&
-        /^\d{4}-\d{2}-\d{2}$/.test(item.date) &&
-        typeof item.description === "string"
-      );
-    });
+    
+    return parsed.filter(
+      (t) =>
+        t &&
+        typeof t.id === "string" &&
+        (t.type === "income" || t.type === "expense") &&
+        typeof t.amount === "number" &&
+        Number.isFinite(t.amount) &&
+        t.amount > 0 &&
+        typeof t.category === "string" &&
+        typeof t.date === "string" &&
+        typeof t.description === "string"
+    );
   } catch (error) {
-    console.error("Failed to parse transactions from localStorage, resetting to empty array:", error);
+    console.error("Failed to parse transactions from localStorage:", error);
     return [];
   }
 }
@@ -316,116 +645,85 @@ function saveTransactions() {
   }
 }
 
-// ==========================================================================
-// DOM Form Validation & UI Setup
-// ==========================================================================
-
 /**
- * Clear all field error messages and invalid styles
+ * Load budget safely from localStorage
+ * Fallback to null on invalid/corrupted data
+ * @returns {number|null} Valid budget limit or null
  */
-function clearFormErrors() {
-  const fields = ["type", "amount", "category", "date", "description"];
-  fields.forEach((fieldId) => {
-    const inputEl = document.getElementById(fieldId);
-    const errorSpan = document.getElementById(`${fieldId}-error`);
-    if (inputEl) inputEl.classList.remove("invalid");
-    if (errorSpan) errorSpan.textContent = "";
-  });
-}
-
-/**
- * Validate transaction form inputs and set error messages
- * @returns {Object|null} Validated data or null if invalid
- */
-function validateForm() {
-  clearFormErrors();
-  let isValid = true;
-  let firstInvalidEl = null;
-
-  const typeEl = document.getElementById("type");
-  const amountEl = document.getElementById("amount");
-  const categoryEl = document.getElementById("category");
-  const dateEl = document.getElementById("date");
-  const descriptionEl = document.getElementById("description");
-
-  const type = typeEl ? typeEl.value : "";
-  const amountVal = amountEl ? amountEl.value : "";
-  const category = categoryEl ? categoryEl.value : "";
-  const date = dateEl ? dateEl.value : "";
-  const description = descriptionEl ? descriptionEl.value.trim() : "";
-
-  // Validate Type
-  if (!type || (type !== "income" && type !== "expense")) {
-    isValid = false;
-    if (typeEl) typeEl.classList.add("invalid");
-    const err = document.getElementById("type-error");
-    if (err) err.textContent = "Please select a transaction type.";
-    if (!firstInvalidEl) firstInvalidEl = typeEl;
-  }
-
-  // Validate Amount
-  const amountNum = Number(amountVal);
-  if (!amountVal || isNaN(amountNum) || amountNum <= 0) {
-    isValid = false;
-    if (amountEl) amountEl.classList.add("invalid");
-    const err = document.getElementById("amount-error");
-    if (err) err.textContent = "Please enter a valid amount greater than ₹0.00.";
-    if (!firstInvalidEl) firstInvalidEl = amountEl;
-  }
-
-  // Validate Category
-  if (!category) {
-    isValid = false;
-    if (categoryEl) categoryEl.classList.add("invalid");
-    const err = document.getElementById("category-error");
-    if (err) err.textContent = "Please select a category.";
-    if (!firstInvalidEl) firstInvalidEl = categoryEl;
-  }
-
-  // Validate Date
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    isValid = false;
-    if (dateEl) dateEl.classList.add("invalid");
-    const err = document.getElementById("date-error");
-    if (err) err.textContent = "Please select a valid date.";
-    if (!firstInvalidEl) firstInvalidEl = dateEl;
-  }
-
-  // Validate Description
-  if (!description || description.length > 100) {
-    isValid = false;
-    if (descriptionEl) descriptionEl.classList.add("invalid");
-    const err = document.getElementById("description-error");
-    if (err) err.textContent = "Please enter a description (max 100 characters).";
-    if (!firstInvalidEl) firstInvalidEl = descriptionEl;
-  }
-
-  if (!isValid) {
-    if (firstInvalidEl && typeof firstInvalidEl.focus === "function") {
-      firstInvalidEl.focus();
+function loadBudget() {
+  try {
+    const raw = localStorage.getItem(STORAGE_BUDGET_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const num = Number(parsed);
+    if (Number.isFinite(num) && num > 0 && num <= 1000000000) {
+      return num;
     }
     return null;
+  } catch (error) {
+    console.error("Failed to parse budget from localStorage:", error);
+    return null;
   }
-
-  // Round amount to 2 decimal places to avoid standard float drift
-  const roundedAmount = Math.round(amountNum * 100) / 100;
-
-  return {
-    type,
-    amount: roundedAmount,
-    category,
-    date,
-    description
-  };
 }
 
 /**
- * Set form date input default value to today's local date
+ * Save state.budget safely to localStorage
+ */
+function saveBudget() {
+  try {
+    if (state.budget === null) {
+      localStorage.removeItem(STORAGE_BUDGET_KEY);
+    } else {
+      localStorage.setItem(STORAGE_BUDGET_KEY, JSON.stringify(state.budget));
+    }
+  } catch (error) {
+    console.error("Failed to save budget to localStorage:", error);
+  }
+}
+
+// ==========================================================================
+// DOM UI Helpers & Setup
+// ==========================================================================
+
+/**
+ * Determine currently tracked month key (YYYY-MM)
+ * Returns filter month if selected, else current local calendar month
+ */
+function getTrackedMonthKey() {
+  if (state.filters && state.filters.month && state.filters.month !== "all") {
+    return state.filters.month;
+  }
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  return `${yyyy}-${mm}`;
+}
+
+/**
+ * Get readable month label (e.g. "October 2026")
+ * @param {string} monthKey 
+ * @returns {string} Formatted month name
+ */
+function getTrackedMonthLabel(monthKey) {
+  if (!monthKey || monthKey.length < 7) return "";
+  const [yearStr, monthStr] = monthKey.split("-");
+  const year = parseInt(yearStr, 10);
+  const monthIndex = parseInt(monthStr, 10) - 1;
+  const dateObj = new Date(year, monthIndex, 1);
+  return dateObj.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+}
+
+/**
+ * Set form date input default value to today in local timezone (YYYY-MM-DD)
  */
 function setDefaultDate() {
   const dateInput = document.getElementById("date");
   if (dateInput) {
-    dateInput.value = getTodayString();
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    dateInput.value = `${yyyy}-${mm}-${dd}`;
   }
 }
 
@@ -547,7 +845,7 @@ function enterEditMode(id) {
   const transaction = state.transactions.find((t) => t.id === id);
   if (!transaction) return;
 
-  clearFormErrors();
+  clearTransactionFormErrors();
   state.editingId = id;
 
   const typeEl = document.getElementById("type");
@@ -583,7 +881,6 @@ function enterEditMode(id) {
 function exitEditMode() {
   state.editingId = null;
 
-  clearFormErrors();
   const form = document.getElementById("transaction-form");
   const submitBtn = document.getElementById("submit-btn");
   const cancelBtn = document.getElementById("cancel-btn");
@@ -591,6 +888,7 @@ function exitEditMode() {
   if (form) form.reset();
   setDefaultDate();
   populateCategoryDropdowns();
+  clearTransactionFormErrors();
 
   if (submitBtn) submitBtn.textContent = "Add Transaction";
   if (cancelBtn) cancelBtn.hidden = true;
@@ -619,6 +917,119 @@ function renderSummary(totals) {
       balanceEl.style.color = "var(--color-income)";
     } else {
       balanceEl.style.color = "var(--text-primary)";
+    }
+  }
+}
+
+/**
+ * Render Smart Insights list into #insights-list
+ * Uses createElement and textContent exclusively to prevent XSS
+ */
+function renderInsights() {
+  const listEl = document.getElementById("insights-list");
+  if (!listEl) return;
+
+  listEl.innerHTML = "";
+
+  const trackedMonthKey = getTrackedMonthKey();
+  const insights = buildInsights(state.transactions, trackedMonthKey);
+
+  insights.forEach((item) => {
+    const li = document.createElement("li");
+    li.className = "insight-item";
+
+    if (item.type === "expense-up") {
+      li.classList.add("insight-expense-up");
+    } else if (item.type === "expense-down") {
+      li.classList.add("insight-expense-down");
+    } else if (item.type === "income-good") {
+      li.classList.add("insight-income-good");
+    }
+
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "insight-icon";
+    iconSpan.setAttribute("aria-hidden", "true");
+    iconSpan.textContent = item.icon;
+
+    const textSpan = document.createElement("span");
+    textSpan.className = "insight-text";
+    textSpan.textContent = item.text;
+
+    li.appendChild(iconSpan);
+    li.appendChild(textSpan);
+
+    listEl.appendChild(li);
+  });
+}
+
+/**
+ * Render Monthly Budget card with progress bar, level colors, and status
+ * Built entirely with textContent and DOM properties
+ */
+function renderBudget() {
+  const trackedMonthKey = getTrackedMonthKey();
+  const trackedMonthLabel = getTrackedMonthLabel(trackedMonthKey);
+
+  const headingEl = document.getElementById("budget-heading");
+  if (headingEl) {
+    headingEl.textContent = `Budget for ${trackedMonthLabel}`;
+  }
+
+  const emptyStateEl = document.getElementById("budget-empty-state");
+  const progressContainerEl = document.getElementById("budget-progress-container");
+  const clearBtn = document.getElementById("budget-clear-btn");
+  const inputEl = document.getElementById("budget-input");
+
+  if (state.budget === null || state.budget <= 0) {
+    if (emptyStateEl) emptyStateEl.hidden = false;
+    if (progressContainerEl) progressContainerEl.hidden = true;
+    if (clearBtn) clearBtn.hidden = true;
+    if (inputEl && document.activeElement !== inputEl) {
+      inputEl.value = "";
+    }
+    return;
+  }
+
+  if (emptyStateEl) emptyStateEl.hidden = true;
+  if (progressContainerEl) progressContainerEl.hidden = false;
+  if (clearBtn) clearBtn.hidden = false;
+  if (inputEl && document.activeElement !== inputEl) {
+    inputEl.value = state.budget;
+  }
+
+  const spent = getMonthExpenseTotal(state.transactions, trackedMonthKey);
+  const { percent, level, remaining } = getBudgetStatus(spent, state.budget);
+
+  const barEl = document.getElementById("budget-bar");
+  const barFillEl = document.getElementById("budget-bar-fill");
+  const textEl = document.getElementById("budget-text");
+  const statusEl = document.getElementById("budget-status");
+
+  const cappedPercent = Math.min(percent, 100);
+  const roundedPercent = Math.min(Math.round(percent), 100);
+
+  if (barEl) {
+    barEl.setAttribute("aria-valuenow", roundedPercent);
+  }
+
+  if (barFillEl) {
+    barFillEl.style.width = `${cappedPercent}%`;
+    barFillEl.className = `budget-bar-fill level-${level}`;
+  }
+
+  if (textEl) {
+    textEl.textContent = `${formatCurrency(spent)} spent of ${formatCurrency(state.budget)} (${percent.toFixed(1)}%)`;
+  }
+
+  if (statusEl) {
+    statusEl.className = `budget-status level-${level}`;
+    if (level === "safe") {
+      statusEl.textContent = `On track - ${formatCurrency(remaining)} left`;
+    } else if (level === "warning") {
+      statusEl.textContent = `Careful - you have used 80%+ of your budget (${formatCurrency(remaining)} left)`;
+    } else {
+      const overAmount = Math.abs(remaining);
+      statusEl.textContent = `Over budget by ${formatCurrency(overAmount)}`;
     }
   }
 }
@@ -765,7 +1176,6 @@ function renderMonthlySummary(transactions) {
   const headerRow = document.createElement("tr");
   ["Month", "Income", "Expense", "Balance"].forEach((heading) => {
     const th = document.createElement("th");
-    th.setAttribute("scope", "col");
     th.textContent = heading;
     headerRow.appendChild(th);
   });
@@ -774,8 +1184,8 @@ function renderMonthlySummary(transactions) {
 
   // Table Body
   const tbody = document.createElement("tbody");
-  const todayStr = getTodayString();
-  const currentMonthKey = todayStr.substring(0, 7);
+  const now = new Date();
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
   summaryData.forEach((item) => {
     const tr = document.createElement("tr");
@@ -963,9 +1373,15 @@ function renderCategoryChart(transactions) {
 function render() {
   populateMonthDropdown();
 
-  // Summary cards show true balance for ALL transactions
+  // Financial summary totals
   const totalSummary = calcTotals(state.transactions);
   renderSummary(totalSummary);
+
+  // Smart insights strip
+  renderInsights();
+
+  // Monthly budget status & progress
+  renderBudget();
 
   // Monthly summary breakdown
   renderMonthlySummary(state.transactions);
@@ -987,8 +1403,294 @@ function render() {
 }
 
 // ==========================================================================
-// Event Handlers & Interaction
+// Event Handlers & Form Validation
 // ==========================================================================
+
+/**
+ * Validate budget input amount
+ * @param {string} valStr 
+ * @returns {string|null} Error string or null if valid
+ */
+function validateBudgetAmount(valStr) {
+  if (!valStr || valStr.trim() === "") {
+    return "Please enter a budget limit.";
+  }
+  const num = Number(valStr);
+  if (!Number.isFinite(num) || num <= 0) {
+    return "Budget limit must be a positive number greater than 0.";
+  }
+  if (num > 1000000000) {
+    return "Budget limit cannot exceed ₹1,000,000,000.";
+  }
+  const decimalMatch = valStr.match(/\.(\d+)/);
+  if (decimalMatch && decimalMatch[1].length > 2) {
+    return "Budget amount cannot have more than 2 decimal places.";
+  }
+  return null;
+}
+
+/**
+ * Handle Budget Form Submission
+ * @param {Event} event 
+ */
+function handleBudgetFormSubmit(event) {
+  event.preventDefault();
+
+  const inputEl = document.getElementById("budget-input");
+  const errorEl = document.getElementById("budget-error");
+  if (!inputEl) return;
+
+  const valStr = inputEl.value.trim();
+  const errorMsg = validateBudgetAmount(valStr);
+
+  if (errorMsg) {
+    inputEl.classList.add("invalid");
+    if (errorEl) errorEl.textContent = errorMsg;
+    inputEl.focus();
+    return;
+  }
+
+  inputEl.classList.remove("invalid");
+  if (errorEl) errorEl.textContent = "";
+
+  state.budget = Number(valStr);
+  saveBudget();
+  render();
+}
+
+/**
+ * Handle Budget Clear / Remove
+ */
+function handleBudgetClear() {
+  state.budget = null;
+  saveBudget();
+
+  const inputEl = document.getElementById("budget-input");
+  const errorEl = document.getElementById("budget-error");
+
+  if (inputEl) {
+    inputEl.value = "";
+    inputEl.classList.remove("invalid");
+  }
+  if (errorEl) {
+    errorEl.textContent = "";
+  }
+
+  render();
+}
+
+/**
+ * Clear all transaction form validation errors
+ */
+function clearTransactionFormErrors() {
+  const fields = [
+    { id: "type", errorId: "type-error" },
+    { id: "amount", errorId: "amount-error" },
+    { id: "category", errorId: "category-error" },
+    { id: "date", errorId: "date-error" },
+    { id: "description", errorId: "description-error" }
+  ];
+
+  fields.forEach(({ id, errorId }) => {
+    const el = document.getElementById(id);
+    const errEl = document.getElementById(errorId);
+    if (el) el.classList.remove("invalid");
+    if (errEl) errEl.textContent = "";
+  });
+
+  const generalErrorEl = document.getElementById("form-error");
+  if (generalErrorEl) {
+    generalErrorEl.textContent = "";
+    generalErrorEl.hidden = true;
+  }
+}
+
+/**
+ * Validate transaction form inputs on submit
+ * Sets field-specific errors, general message in #form-error, .invalid class, and focuses first invalid field.
+ * @returns {boolean} True if valid, false if invalid
+ */
+function validateTransactionForm() {
+  clearTransactionFormErrors();
+
+  const typeEl = document.getElementById("type");
+  const amountEl = document.getElementById("amount");
+  const categoryEl = document.getElementById("category");
+  const dateEl = document.getElementById("date");
+  const descriptionEl = document.getElementById("description");
+  const generalErrorEl = document.getElementById("form-error");
+
+  const errors = {};
+  let firstInvalidEl = null;
+
+  // 1. Type validation
+  const typeVal = typeEl ? typeEl.value : "";
+  if (!typeVal) {
+    errors.type = "Please select a transaction type.";
+    if (typeEl) {
+      typeEl.classList.add("invalid");
+      if (!firstInvalidEl) firstInvalidEl = typeEl;
+    }
+  }
+
+  // 2. Amount validation
+  const amountVal = amountEl ? amountEl.value.trim() : "";
+  if (!amountVal) {
+    errors.amount = "Amount is required.";
+    if (amountEl) {
+      amountEl.classList.add("invalid");
+      if (!firstInvalidEl) firstInvalidEl = amountEl;
+    }
+  } else {
+    const amt = Number(amountVal);
+    if (isNaN(amt) || amt <= 0) {
+      errors.amount = "Amount must be a positive number greater than 0.";
+      if (amountEl) {
+        amountEl.classList.add("invalid");
+        if (!firstInvalidEl) firstInvalidEl = amountEl;
+      }
+    } else {
+      const decMatch = amountVal.match(/\.(\d+)/);
+      if (decMatch && decMatch[1].length > 2) {
+        errors.amount = "Amount cannot have more than 2 decimal places.";
+        if (amountEl) {
+          amountEl.classList.add("invalid");
+          if (!firstInvalidEl) firstInvalidEl = amountEl;
+        }
+      }
+    }
+  }
+
+  // 3. Category validation
+  const categoryVal = categoryEl ? categoryEl.value : "";
+  if (!categoryVal) {
+    errors.category = "Please select a category.";
+    if (categoryEl) {
+      categoryEl.classList.add("invalid");
+      if (!firstInvalidEl) firstInvalidEl = categoryEl;
+    }
+  }
+
+  // 4. Date validation
+  const dateVal = dateEl ? dateEl.value : "";
+  if (!dateVal) {
+    errors.date = "Date is required.";
+    if (dateEl) {
+      dateEl.classList.add("invalid");
+      if (!firstInvalidEl) firstInvalidEl = dateEl;
+    }
+  } else {
+    const dObj = new Date(dateVal);
+    if (isNaN(dObj.getTime())) {
+      errors.date = "Please enter a valid date.";
+      if (dateEl) {
+        dateEl.classList.add("invalid");
+        if (!firstInvalidEl) firstInvalidEl = dateEl;
+      }
+    }
+  }
+
+  // 5. Description validation
+  const descVal = descriptionEl ? descriptionEl.value.trim() : "";
+  if (!descVal) {
+    errors.description = "Description is required.";
+    if (descriptionEl) {
+      descriptionEl.classList.add("invalid");
+      if (!firstInvalidEl) firstInvalidEl = descriptionEl;
+    }
+  } else if (descVal.length > 100) {
+    errors.description = "Description cannot exceed 100 characters.";
+    if (descriptionEl) {
+      descriptionEl.classList.add("invalid");
+      if (!firstInvalidEl) firstInvalidEl = descriptionEl;
+    }
+  }
+
+  // Display field error messages
+  if (errors.type) {
+    const errSpan = document.getElementById("type-error");
+    if (errSpan) errSpan.textContent = errors.type;
+  }
+  if (errors.amount) {
+    const errSpan = document.getElementById("amount-error");
+    if (errSpan) errSpan.textContent = errors.amount;
+  }
+  if (errors.category) {
+    const errSpan = document.getElementById("category-error");
+    if (errSpan) errSpan.textContent = errors.category;
+  }
+  if (errors.date) {
+    const errSpan = document.getElementById("date-error");
+    if (errSpan) errSpan.textContent = errors.date;
+  }
+  if (errors.description) {
+    const errSpan = document.getElementById("description-error");
+    if (errSpan) errSpan.textContent = errors.description;
+  }
+
+  const hasErrors = Object.keys(errors).length > 0;
+
+  if (hasErrors) {
+    if (generalErrorEl) {
+      generalErrorEl.textContent = "Please fill in all the fields";
+      generalErrorEl.hidden = false;
+    }
+    if (firstInvalidEl) {
+      firstInvalidEl.focus();
+    }
+    return false;
+  }
+
+  if (generalErrorEl) {
+    generalErrorEl.textContent = "";
+    generalErrorEl.hidden = true;
+  }
+
+  return true;
+}
+
+/**
+ * Bind real-time input listeners to clear validation errors when user types or selects values
+ */
+function wireRealTimeFormValidation() {
+  const fields = [
+    { id: "type", errorId: "type-error", events: ["change"] },
+    { id: "amount", errorId: "amount-error", events: ["input", "change"] },
+    { id: "category", errorId: "category-error", events: ["change"] },
+    { id: "date", errorId: "date-error", events: ["change", "input"] },
+    { id: "description", errorId: "description-error", events: ["input", "change"] }
+  ];
+
+  fields.forEach(({ id, errorId, events }) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    events.forEach((evtName) => {
+      el.addEventListener(evtName, () => {
+        const val = el.value.trim();
+        if (val) {
+          el.classList.remove("invalid");
+          const errSpan = document.getElementById(errorId);
+          if (errSpan) errSpan.textContent = "";
+
+          const typeVal = document.getElementById("type")?.value;
+          const amtVal = document.getElementById("amount")?.value.trim();
+          const catVal = document.getElementById("category")?.value;
+          const dateVal = document.getElementById("date")?.value;
+          const descVal = document.getElementById("description")?.value.trim();
+
+          if (typeVal && amtVal && catVal && dateVal && descVal) {
+            const generalErr = document.getElementById("form-error");
+            if (generalErr) {
+              generalErr.textContent = "";
+              generalErr.hidden = true;
+            }
+          }
+        }
+      });
+    });
+  });
+}
 
 /**
  * Form Submit Handler for creating or updating transactions
@@ -997,8 +1699,21 @@ function render() {
 function handleFormSubmit(event) {
   event.preventDefault();
 
-  const validatedData = validateForm();
-  if (!validatedData) return;
+  if (!validateTransactionForm()) {
+    return;
+  }
+
+  const typeEl = document.getElementById("type");
+  const amountEl = document.getElementById("amount");
+  const categoryEl = document.getElementById("category");
+  const dateEl = document.getElementById("date");
+  const descriptionEl = document.getElementById("description");
+
+  const type = typeEl.value;
+  const amount = Number(amountEl.value);
+  const category = categoryEl.value;
+  const date = dateEl.value;
+  const description = descriptionEl.value.trim();
 
   if (state.editingId) {
     // Update existing transaction
@@ -1006,7 +1721,11 @@ function handleFormSubmit(event) {
     if (index !== -1) {
       state.transactions[index] = {
         ...state.transactions[index],
-        ...validatedData
+        type,
+        amount,
+        category,
+        date,
+        description
       };
     }
     exitEditMode();
@@ -1014,14 +1733,18 @@ function handleFormSubmit(event) {
     // Add new transaction
     const newTransaction = {
       id: generateId(),
-      ...validatedData
+      type,
+      amount,
+      category,
+      date,
+      description
     };
     state.transactions.push(newTransaction);
     const form = document.getElementById("transaction-form");
     if (form) form.reset();
-    clearFormErrors();
     setDefaultDate();
     populateCategoryDropdowns();
+    clearTransactionFormErrors();
   }
 
   saveTransactions();
@@ -1108,13 +1831,23 @@ function clearFilters() {
 
 function init() {
   state.transactions = loadTransactions();
+  state.budget = loadBudget();
   
   populateCategoryDropdowns();
   setDefaultDate();
 
+  // Budget Form & Actions
+  const budgetForm = document.getElementById("budget-form");
+  if (budgetForm) budgetForm.addEventListener("submit", handleBudgetFormSubmit);
+
+  const budgetClearBtn = document.getElementById("budget-clear-btn");
+  if (budgetClearBtn) budgetClearBtn.addEventListener("click", handleBudgetClear);
+
   // Form & Actions
   const form = document.getElementById("transaction-form");
   if (form) form.addEventListener("submit", handleFormSubmit);
+
+  wireRealTimeFormValidation();
 
   const cancelBtn = document.getElementById("cancel-btn");
   if (cancelBtn) cancelBtn.addEventListener("click", handleCancelClick);
@@ -1128,26 +1861,7 @@ function init() {
   }
 
   const typeSelect = document.getElementById("type");
-  if (typeSelect) {
-    typeSelect.addEventListener("change", () => {
-      populateCategoryDropdowns();
-      const err = document.getElementById("type-error");
-      if (err) err.textContent = "";
-      typeSelect.classList.remove("invalid");
-    });
-  }
-
-  // Clear field errors on user input
-  ["amount", "category", "date", "description"].forEach((fieldId) => {
-    const inputEl = document.getElementById(fieldId);
-    if (inputEl) {
-      inputEl.addEventListener("input", () => {
-        inputEl.classList.remove("invalid");
-        const err = document.getElementById(`${fieldId}-error`);
-        if (err) err.textContent = "";
-      });
-    }
-  });
+  if (typeSelect) typeSelect.addEventListener("change", populateCategoryDropdowns);
 
   // Filter Wire Events
   const filterType = document.getElementById("filter-type");
